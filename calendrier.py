@@ -19,7 +19,7 @@ verrou = threading.Lock()  # évite de lancer plusieurs Chromium en parallèle
 
 
 def formater_date(date_texte):
-    """Convertit '08.11. 20:00' ou '08.11.2026 20:00' en datetime UTC (heure source : Tunis)."""
+    """Convertit '21.11. 17:30' ou '21.11.2026 17:30' en datetime UTC (heure source : Tunis)."""
     try:
         m = re.search(r"(\d{1,2})\.(\d{1,2})\.(\d{4})?\s*(\d{1,2}):(\d{2})", date_texte)
         if not m:
@@ -86,9 +86,9 @@ def extraire_matchs():
 
             for index, ligne in enumerate(lignes):
                 try:
-                    date_brute = ligne.locator(".event__time").first.text_content(timeout=2000).strip()
-                    domicile = ligne.locator(".event__participant--home").first.text_content(timeout=2000).strip()
-                    exterieur = ligne.locator(".event__participant--away").first.text_content(timeout=2000).strip()
+                    date_brute = ligne.locator(".event__stageTime").first.text_content(timeout=2000).strip()
+                    domicile = ligne.locator(".event__homeParticipant").first.text_content(timeout=2000).strip()
+                    exterieur = ligne.locator(".event__awayParticipant").first.text_content(timeout=2000).strip()
                     print(f"Match {index + 1} : {date_brute} | {domicile} vs {exterieur}")
 
                     debut = formater_date(date_brute)
