@@ -1,3 +1,4 @@
+import re
 import time
 import threading
 from datetime import datetime, timedelta, timezone
@@ -18,14 +19,20 @@ verrou = threading.Lock()  # évite de lancer plusieurs Chromium en parallèle
 
 
 def formater_date(date_texte):
-    """Convertit '08.11. 20:00' en datetime (heure de Tunis) puis en UTC."""
+    """Convertit '08.11. 20:00' ou '08.11.2026 20:00' en datetime UTC (heure source : Tunis)."""
     try:
+        m = re.search(r"(\d{1,2})\.(\d{1,2})\.(\d{4})?\s*(\d{1,2}):(\d{2})", date_texte)
+        if not m:
+            raise ValueError("format de date inconnu")
+
+        jour, mois, annee, heure, minute = m.groups()
         maintenant = datetime.now(TZ_TUNIS)
-        d = datetime.strptime(f"{date_texte.strip()} {maintenant.year}", "%d.%m. %H:%M %Y")
-        d = d.replace(tzinfo=TZ_TUNIS)
+        annee = int(annee) if annee else maintenant.year
+
+        d = datetime(annee, int(mois), int(jour), int(heure), int(minute), tzinfo=TZ_TUNIS)
         # Match en janvier alors qu'on est en novembre : année suivante
-        if d < maintenant - timedelta(days=180):
-            d = d.replace(year=maintenant.year + 1)
+        if not m.group(3) and d < maintenant - timedelta(days=180):
+            d = d.replace(year=annee + 1)
         return d.astimezone(timezone.utc)
     except ValueError as e:
         print(f"Erreur de formatage de la date : {date_texte} -> {e}")
@@ -79,15 +86,18 @@ def extraire_matchs():
 
             for index, ligne in enumerate(lignes):
                 try:
-                    date_brute = ligne.locator(".event__time").text_content(timeout=2000).strip()
-                    domicile = ligne.locator(".event__homeParticipant").text_content(timeout=2000).strip()
-                    exterieur = ligne.locator(".event__awayParticipant").text_content(timeout=2000).strip()
+                    date_brute = ligne.locator(".event__time").first.text_content(timeout=2000).strip()
+                    domicile = ligne.locator(".event__participant--home").first.text_content(timeout=2000).strip()
+                    exterieur = ligne.locator(".event__participant--away").first.text_content(timeout=2000).strip()
                     print(f"Match {index + 1} : {date_brute} | {domicile} vs {exterieur}")
 
                     debut = formater_date(date_brute)
                     if debut:
                         matchs.append({"debut": debut, "domicile": domicile, "exterieur": exterieur})
-                except Exception:
+                except Exception as e:
+                    print(f"Ligne {index + 1} ignorée : {e}")
+                    if index == 0:
+                        print(ligne.inner_html()[:1500])
                     continue
         finally:
             navigateur.close()
