@@ -19,24 +19,35 @@ verrou = threading.Lock()  # évite de lancer plusieurs Chromium en parallèle
 
 
 def formater_date(date_texte):
-    """Convertit '21.11. 17:30' ou '21.11.2026 17:30' en datetime UTC (heure source : Tunis)."""
+    """Retourne (debut, toute_la_journee).
+    '21.11. 17:30' -> datetime UTC ; '02.01.2027' -> date seule (heure inconnue)."""
     try:
-        m = re.search(r"(\d{1,2})\.(\d{1,2})\.(\d{4})?\s*(\d{1,2}):(\d{2})", date_texte)
+        m = re.search(r"(\d{1,2})\.(\d{1,2})\.(\d{4})?\s*(?:(\d{1,2}):(\d{2}))?", date_texte)
         if not m:
             raise ValueError("format de date inconnu")
 
         jour, mois, annee, heure, minute = m.groups()
         maintenant = datetime.now(TZ_TUNIS)
-        annee = int(annee) if annee else maintenant.year
+        annee_explicite = annee is not None
+        annee = int(annee) if annee_explicite else maintenant.year
+
+        # Heure inconnue : événement sur toute la journée
+        if heure is None:
+            return datetime(annee, int(mois), int(jour)).date(), True
 
         d = datetime(annee, int(mois), int(jour), int(heure), int(minute), tzinfo=TZ_TUNIS)
         # Match en janvier alors qu'on est en novembre : année suivante
-        if not m.group(3) and d < maintenant - timedelta(days=180):
+        if not annee_explicite and d < maintenant - timedelta(days=180):
             d = d.replace(year=annee + 1)
-        return d.astimezone(timezone.utc)
+        return d.astimezone(timezone.utc), False
     except ValueError as e:
         print(f"Erreur de formatage de la date : {date_texte} -> {e}")
-        return None
+        return None, False
+
+
+def nettoyer(nom):
+    """Retire les suffixes de pays : 'Zamalek (Egy)' -> 'Zamalek'."""
+    return re.sub(r"\s*\([^)]*\)", "", nom).strip()
 
 
 def extraire_matchs():
@@ -91,9 +102,14 @@ def extraire_matchs():
                     exterieur = ligne.locator(".event__awayParticipant").first.text_content(timeout=2000).strip()
                     print(f"Match {index + 1} : {date_brute} | {domicile} vs {exterieur}")
 
-                    debut = formater_date(date_brute)
+                    debut, toute_journee = formater_date(date_brute)
                     if debut:
-                        matchs.append({"debut": debut, "domicile": domicile, "exterieur": exterieur})
+                        matchs.append({
+                            "debut": debut,
+                            "toute_journee": toute_journee,
+                            "domicile": nettoyer(domicile),
+                            "exterieur": nettoyer(exterieur),
+                        })
                 except Exception as e:
                     print(f"Ligne {index + 1} ignorée : {e}")
                     if index == 0:
@@ -115,9 +131,16 @@ def construire_ics(matchs):
         ev = Event()
         ev.add("uid", f"{m['debut']:%Y%m%dT%H%M}-{m['domicile']}-{m['exterieur']}@club-africain".replace(" ", ""))
         ev.add("dtstamp", datetime.now(timezone.utc))
-        ev.add("summary", f"🔴⚪ {m['domicile']} vs {m['exterieur']}")
-        ev.add("dtstart", m["debut"])
-        ev.add("dtend", m["debut"] + timedelta(hours=2))
+
+        if m["toute_journee"]:
+            ev.add("summary", f"🔴⚪ {m['domicile']} vs {m['exterieur']} (heure à confirmer)")
+            ev.add("dtstart", m["debut"])
+            ev.add("dtend", m["debut"] + timedelta(days=1))
+        else:
+            ev.add("summary", f"🔴⚪ {m['domicile']} vs {m['exterieur']}")
+            ev.add("dtstart", m["debut"])
+            ev.add("dtend", m["debut"] + timedelta(hours=2))
+
         calendrier.add_component(ev)
 
     return calendrier.to_ical().decode("utf-8")
